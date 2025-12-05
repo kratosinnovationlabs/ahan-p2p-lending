@@ -56,7 +56,16 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
       if (CONTRACTS.POOL && CONTRACTS.LQBUSD) {
         const lqBUSDContract = new ethers.Contract(CONTRACTS.LQBUSD, LQBUSD_ABI, provider)
         const lqBal = await lqBUSDContract.balanceOf(account)
-        setLqBUSDBalance(ethers.formatUnits(lqBal, 18)) // lqBUSD is standard 18
+        
+        // SIMULATED YIELD LOGIC
+        // Check for simulated yield multiplier from repayments
+        const yieldMultiplier = parseFloat(localStorage.getItem('ahan_yield_multiplier') || '1.0')
+        
+        // Calculate displayed balance (Real Balance * Multiplier)
+        const realBalance = parseFloat(ethers.formatUnits(lqBal, 18))
+        const displayedBalance = (realBalance * yieldMultiplier).toFixed(4)
+        
+        setLqBUSDBalance(displayedBalance)
 
         const poolContract = new ethers.Contract(CONTRACTS.POOL, POOL_ABI, provider)
         const position = await poolContract.getLenderPosition(account)
@@ -240,7 +249,7 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
             <div className="grid md:grid-cols-4 gap-6 mb-12">
               {[
                 { label: 'BUSDT BALANCE', value: `${parseFloat(busdtBalance).toFixed(2)} BUSDT`, icon: DollarSign, color: 'bg-neo-pink' },
-                { label: 'lqBUSD BALANCE', value: `${parseFloat(lqBUSDBalance).toFixed(2)} lqBUSD`, icon: Wallet, color: 'bg-neo-cyan' },
+                { label: 'lqBUSD BALANCE', value: `${lqBUSDBalance} lqBUSD`, icon: Wallet, color: 'bg-neo-cyan' },
                 { label: 'DEPOSITED', value: `${parseFloat(depositedAmount).toFixed(2)} BUSDT`, icon: TrendingUp, color: 'bg-neo-yellow' },
                 { label: 'CURRENT APY', value: '6.2%', icon: ArrowUpRight, color: 'bg-neo-green' },
               ].map((stat, idx) => (

@@ -36,6 +36,7 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
     event Deposited(address indexed lender, uint256 amount, uint256 lqBUSDMinted);
     event Withdrawn(address indexed lender, uint256 amount, uint256 lqBUSDBurned);
+    event Borrowed(address indexed borrower, uint256 amount);
 
     constructor(address _busdt, address _lqBUSD) Ownable(msg.sender) {
         require(_busdt != address(0), "Invalid BUSDT address");
@@ -95,6 +96,24 @@ contract LendingPool is Ownable, ReentrancyGuard {
         totalDeposits -= amount;
         
         emit Withdrawn(msg.sender, amount, amount);
+    }
+
+    /**
+     * @notice Borrow BUSDT from the pool (Unsecured for Demo)
+     * @param amount Amount of BUSDT to borrow
+     */
+    function borrow(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        
+        uint256 availableLiquidity = busdt.balanceOf(address(this));
+        require(availableLiquidity >= amount, "Insufficient pool liquidity");
+        
+        // Transfer BUSDT to borrower
+        busdt.safeTransfer(msg.sender, amount);
+        
+        totalBorrowed += amount;
+        
+        emit Borrowed(msg.sender, amount);
     }
 
     function getLenderPosition(address lender) external view returns (
