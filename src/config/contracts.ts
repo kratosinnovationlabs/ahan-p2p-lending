@@ -1,10 +1,10 @@
 export const CONTRACTS = {
   // Official BUSDT on BSC Testnet
-  BUSDT: '0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee',
+  BUSDT: import.meta.env.VITE_BUSDT_ADDRESS || '0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee',
   
-  // AHAN Platform Contracts (update after deployment)
-  LQBUSD: import.meta.env.VITE_LQBUSD_ADDRESS || '',
-  POOL: import.meta.env.VITE_POOL_ADDRESS || '',
+  // AHAN Platform Contracts
+  LQBUSD: import.meta.env.VITE_LQBUSD_ADDRESS || '0x42E35b0198102C6c336728d56Cd30114C415D9BE',
+  POOL: import.meta.env.VITE_POOL_ADDRESS || '0x0f85EC2A15a5FC317af2150Bd03c7C3C21c3D5aa',
 } as const
 
 export const BUSDT_ABI = [
@@ -21,6 +21,8 @@ export const LQBUSD_ABI = [
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
   'function name() view returns (string)',
+  'function owner() view returns (address)',
+  'function transferOwnership(address newOwner)',
 ]
 
 export const POOL_ABI = [

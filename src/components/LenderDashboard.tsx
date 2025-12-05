@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowLeft, Wallet, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Wallet, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, AlertCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useWeb3 } from '../contexts/Web3Context'
 import { ethers } from 'ethers'
 import { CONTRACTS, BUSDT_ABI, LQBUSD_ABI, POOL_ABI } from '../config/contracts'
@@ -14,33 +14,49 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
   const [redeemAmount, setRedeemAmount] = useState('')
   const [isDepositing, setIsDepositing] = useState(false)
   const [isRedeeming, setIsRedeeming] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  
+  // Balances
   const [busdtBalance, setBusdtBalance] = useState('0')
   const [lqBUSDBalance, setLqBUSDBalance] = useState('0')
   const [depositedAmount, setDepositedAmount] = useState('0')
-  const [txStatus, setTxStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null)
+  const [busdtDecimals, setBusdtDecimals] = useState(18)
   
-  const { account, provider, signer } = useWeb3()
+  const [txStatus, setTxStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null)
+  
+  const { account, provider, signer, chainId } = useWeb3()
 
   useEffect(() => {
     if (account && provider) {
       loadBalances()
     }
-  }, [account, provider])
+  }, [account, provider, chainId])
 
   const loadBalances = async () => {
     if (!account || !provider) return
+    setIsLoading(true)
 
     try {
-      // Load BUSDT balance
+      // 1. Load BUSDT details
       const busdtContract = new ethers.Contract(CONTRACTS.BUSDT, BUSDT_ABI, provider)
-      const busdtBal = await busdtContract.balanceOf(account)
-      setBusdtBalance(ethers.formatUnits(busdtBal, 18))
+      
+      // Get decimals first to ensure correct formatting
+      let decimals = 18
+      try {
+        decimals = Number(await busdtContract.decimals())
+        setBusdtDecimals(decimals)
+      } catch (e) {
+        console.warn('Could not fetch decimals, defaulting to 18', e)
+      }
 
-      // Load lqBUSD balance and position (if pool is deployed)
+      const busdtBal = await busdtContract.balanceOf(account)
+      setBusdtBalance(ethers.formatUnits(busdtBal, decimals))
+
+      // 2. Load lqBUSD balance and position
       if (CONTRACTS.POOL && CONTRACTS.LQBUSD) {
         const lqBUSDContract = new ethers.Contract(CONTRACTS.LQBUSD, LQBUSD_ABI, provider)
         const lqBal = await lqBUSDContract.balanceOf(account)
-        setLqBUSDBalance(ethers.formatUnits(lqBal, 18))
+        setLqBUSDBalance(ethers.formatUnits(lqBal, 18)) // lqBUSD is standard 18
 
         const poolContract = new ethers.Contract(CONTRACTS.POOL, POOL_ABI, provider)
         const position = await poolContract.getLenderPosition(account)
@@ -48,17 +64,14 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
       }
     } catch (error) {
       console.error('Error loading balances:', error)
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const handleDeposit = async () => {
     if (!account || !signer) {
       setTxStatus({ type: 'error', message: 'Please connect your wallet first' })
-      return
-    }
-
-    if (!CONTRACTS.POOL) {
-      setTxStatus({ type: 'error', message: 'Pool contract not deployed. Please deploy contracts first.' })
       return
     }
 
@@ -71,30 +84,61 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
     setTxStatus(null)
 
     try {
-      const amount = ethers.parseUnits(depositAmount, 18)
-
-      // Step 1: Approve BUSDT
-      setTxStatus({ type: 'success', message: 'Step 1/2: Approving BUSDT...' })
+      const amount = ethers.parseUnits(depositAmount, busdtDecimals)
       const busdtContract = new ethers.Contract(CONTRACTS.BUSDT, BUSDT_ABI, signer)
-      const approveTx = await busdtContract.approve(CONTRACTS.POOL, amount)
-      await approveTx.wait()
-
-      // Step 2: Deposit to pool
-      setTxStatus({ type: 'success', message: 'Step 2/2: Depositing to pool...' })
       const poolContract = new ethers.Contract(CONTRACTS.POOL, POOL_ABI, signer)
-      const depositTx = await poolContract.deposit(amount)
+
+      // Check Allowance first
+      setTxStatus({ type: 'info', message: 'Checking token allowance...' })
+      const currentAllowance = await busdtContract.allowance(account, CONTRACTS.POOL)
+      
+      if (currentAllowance < amount) {
+        setTxStatus({ type: 'info', message: 'Step 1/2: Please approve BUSDT usage in your wallet...' })
+        
+        // Explicit gas limit for approval
+        const approveTx = await busdtContract.approve(CONTRACTS.POOL, amount, {
+          gasLimit: 300000
+        })
+        
+        setTxStatus({ type: 'info', message: 'Approving... Waiting for confirmation...' })
+        await approveTx.wait()
+        setTxStatus({ type: 'success', message: 'Approval successful! Proceeding to deposit...' })
+      }
+
+      // Deposit
+      setTxStatus({ type: 'info', message: 'Step 2/2: Confirm deposit transaction...' })
+      
+      // Explicit gas limit for deposit
+      const depositTx = await poolContract.deposit(amount, {
+        gasLimit: 500000
+      })
+      
+      setTxStatus({ type: 'info', message: 'Depositing... Waiting for confirmation...' })
       const receipt = await depositTx.wait()
 
       setTxStatus({ 
         type: 'success', 
-        message: `✅ Successfully deposited ${depositAmount} BUSDT! You received ${depositAmount} lqBUSD. Tx: ${receipt.hash.slice(0, 10)}...` 
+        message: `✅ Successfully deposited ${depositAmount} BUSDT! Tx: ${receipt.hash.slice(0, 10)}...` 
       })
       
       setDepositAmount('')
       await loadBalances()
     } catch (error: unknown) {
       console.error('Deposit error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Transaction failed'
+      
+      let errorMessage = 'Transaction failed'
+      if (error instanceof Error) {
+        if (error.message.includes('user rejected')) {
+          errorMessage = 'Transaction rejected by user'
+        } else if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient BNB for gas fees'
+        } else if (error.message.includes('Ownable')) {
+          errorMessage = 'Contract Permission Error: Pool cannot mint tokens.'
+        } else {
+          errorMessage = error.message.slice(0, 100) + (error.message.length > 100 ? '...' : '')
+        }
+      }
+      
       setTxStatus({ type: 'error', message: `❌ ${errorMessage}` })
     } finally {
       setIsDepositing(false)
@@ -107,11 +151,6 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
       return
     }
 
-    if (!CONTRACTS.POOL) {
-      setTxStatus({ type: 'error', message: 'Pool contract not deployed. Please deploy contracts first.' })
-      return
-    }
-
     if (!redeemAmount || parseFloat(redeemAmount) <= 0) {
       setTxStatus({ type: 'error', message: 'Please enter a valid amount' })
       return
@@ -121,16 +160,20 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
     setTxStatus(null)
 
     try {
-      const amount = ethers.parseUnits(redeemAmount, 18)
+      const amount = ethers.parseUnits(redeemAmount, 18) // lqBUSD is 18 decimals
 
-      setTxStatus({ type: 'success', message: 'Withdrawing from pool...' })
+      setTxStatus({ type: 'info', message: 'Withdrawing from pool...' })
       const poolContract = new ethers.Contract(CONTRACTS.POOL, POOL_ABI, signer)
-      const withdrawTx = await poolContract.withdraw(amount)
+      
+      const withdrawTx = await poolContract.withdraw(amount, {
+        gasLimit: 500000
+      })
+      
       const receipt = await withdrawTx.wait()
 
       setTxStatus({ 
         type: 'success', 
-        message: `✅ Successfully redeemed ${redeemAmount} lqBUSD for BUSDT! Tx: ${receipt.hash.slice(0, 10)}...` 
+        message: `✅ Successfully redeemed ${redeemAmount} lqBUSD! Tx: ${receipt.hash.slice(0, 10)}...` 
       })
       
       setRedeemAmount('')
@@ -181,9 +224,13 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
           <>
             {/* Transaction Status */}
             {txStatus && (
-              <div className={`${txStatus.type === 'success' ? 'bg-neo-green' : 'bg-neo-pink'} border-brutal p-6 shadow-brutal mb-8`}>
+              <div className={`${
+                txStatus.type === 'success' ? 'bg-neo-green' : 
+                txStatus.type === 'error' ? 'bg-neo-pink' : 'bg-neo-yellow'
+              } border-brutal p-6 shadow-brutal mb-8 transition-all duration-300`}>
                 <div className="flex items-center gap-3">
                   {txStatus.type === 'error' && <AlertCircle className="w-6 h-6 text-neo-black" />}
+                  {txStatus.type === 'info' && <RefreshCw className="w-6 h-6 text-neo-black animate-spin" />}
                   <p className="font-bold text-neo-black">{txStatus.message}</p>
                 </div>
               </div>
@@ -197,7 +244,8 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
                 { label: 'DEPOSITED', value: `${parseFloat(depositedAmount).toFixed(2)} BUSDT`, icon: TrendingUp, color: 'bg-neo-yellow' },
                 { label: 'CURRENT APY', value: '6.2%', icon: ArrowUpRight, color: 'bg-neo-green' },
               ].map((stat, idx) => (
-                <div key={idx} className={`${stat.color} border-brutal p-6 shadow-brutal`}>
+                <div key={idx} className={`${stat.color} border-brutal p-6 shadow-brutal relative overflow-hidden`}>
+                  {isLoading && <div className="absolute top-2 right-2"><RefreshCw className="w-4 h-4 animate-spin text-neo-black opacity-50"/></div>}
                   <stat.icon className="w-8 h-8 mb-3 text-neo-black" />
                   <p className="text-sm font-bold text-neo-black mb-1">{stat.label}</p>
                   <p className="text-2xl font-bold text-neo-black">{stat.value}</p>
@@ -218,16 +266,24 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
                 </p>
                 <div className="mb-4">
                   <label className="block text-sm font-bold text-neo-black mb-2">AMOUNT (BUSDT)</label>
-                  <input
-                    type="number"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-neo-white border-brutal p-4 text-2xl font-bold text-neo-black focus:outline-none"
-                    disabled={isDepositing}
-                  />
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-neo-white border-brutal p-4 text-2xl font-bold text-neo-black focus:outline-none"
+                      disabled={isDepositing}
+                    />
+                    <button 
+                      onClick={() => setDepositAmount(busdtBalance)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold bg-neo-black text-neo-white px-2 py-1 hover:bg-gray-800"
+                    >
+                      MAX
+                    </button>
+                  </div>
                   <p className="text-xs text-neo-black font-mono mt-2">
-                    Available: {parseFloat(busdtBalance).toFixed(2)} BUSDT
+                    Available: {parseFloat(busdtBalance).toFixed(4)} BUSDT
                   </p>
                 </div>
                 <button
@@ -235,7 +291,7 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
                   disabled={!depositAmount || isDepositing}
                   className="w-full bg-neo-black text-neo-white px-6 py-4 border-brutal font-bold text-xl hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all shadow-brutal disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isDepositing ? 'DEPOSITING...' : 'DEPOSIT NOW'}
+                  {isDepositing ? 'PROCESSING...' : 'DEPOSIT NOW'}
                 </button>
               </div>
 
@@ -250,16 +306,24 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
                 </p>
                 <div className="mb-4">
                   <label className="block text-sm font-bold text-neo-black mb-2">AMOUNT (lqBUSD)</label>
-                  <input
-                    type="number"
-                    value={redeemAmount}
-                    onChange={(e) => setRedeemAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-neo-white border-brutal p-4 text-2xl font-bold text-neo-black focus:outline-none"
-                    disabled={isRedeeming}
-                  />
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={redeemAmount}
+                      onChange={(e) => setRedeemAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-neo-white border-brutal p-4 text-2xl font-bold text-neo-black focus:outline-none"
+                      disabled={isRedeeming}
+                    />
+                    <button 
+                      onClick={() => setRedeemAmount(lqBUSDBalance)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold bg-neo-black text-neo-white px-2 py-1 hover:bg-gray-800"
+                    >
+                      MAX
+                    </button>
+                  </div>
                   <p className="text-xs text-neo-black font-mono mt-2">
-                    Available: {parseFloat(lqBUSDBalance).toFixed(2)} lqBUSD
+                    Available: {parseFloat(lqBUSDBalance).toFixed(4)} lqBUSD
                   </p>
                 </div>
                 <button
@@ -267,20 +331,21 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
                   disabled={!redeemAmount || isRedeeming}
                   className="w-full bg-neo-black text-neo-white px-6 py-4 border-brutal font-bold text-xl hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all shadow-brutal disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isRedeeming ? 'REDEEMING...' : 'REDEEM NOW'}
+                  {isRedeeming ? 'PROCESSING...' : 'REDEEM NOW'}
                 </button>
               </div>
             </div>
 
             {/* Info Box */}
             <div className="bg-neo-yellow border-brutal p-6 shadow-brutal">
-              <h3 className="text-xl font-bold text-neo-black mb-3">📋 HOW IT WORKS</h3>
-              <ul className="space-y-2 text-neo-black font-mono">
-                <li>• Deposit BUSDT → Receive lqBUSD tokens (1:1 ratio)</li>
-                <li>• lqBUSD represents your share in the lending pool</li>
-                <li>• Earn interest as borrowers repay loans</li>
-                <li>• Redeem lqBUSD anytime for BUSDT + interest</li>
-                <li>• Official BUSDT: {CONTRACTS.BUSDT}</li>
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className="w-6 h-6 text-neo-black" />
+                <h3 className="text-xl font-bold text-neo-black">CONTRACT INFO</h3>
+              </div>
+              <ul className="space-y-2 text-neo-black font-mono text-sm break-all">
+                <li>• BUSDT: {CONTRACTS.BUSDT}</li>
+                <li>• POOL: {CONTRACTS.POOL}</li>
+                <li>• lqBUSD: {CONTRACTS.LQBUSD}</li>
               </ul>
             </div>
           </>
