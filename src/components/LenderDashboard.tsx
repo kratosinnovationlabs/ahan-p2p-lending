@@ -57,15 +57,15 @@ function LenderDashboard({ onBack }: LenderDashboardProps) {
         const lqBUSDContract = new ethers.Contract(CONTRACTS.LQBUSD, LQBUSD_ABI, provider)
         const lqBal = await lqBUSDContract.balanceOf(account)
         
-        // SIMULATED YIELD LOGIC
-        // Check for simulated yield multiplier from repayments
-        const yieldMultiplier = parseFloat(localStorage.getItem('ahan_yield_multiplier') || '1.0')
+        // DEMO LOGIC: Check if repayment occurred
+        const repaymentDone = localStorage.getItem('ahan_demo_repayment_done') === 'true'
         
-        // Calculate displayed balance (Real Balance * Multiplier)
-        const realBalance = parseFloat(ethers.formatUnits(lqBal, 18))
-        const displayedBalance = (realBalance * yieldMultiplier).toFixed(4)
-        
-        setLqBUSDBalance(displayedBalance)
+        if (repaymentDone) {
+           // Hardcoded value as requested for demo
+           setLqBUSDBalance('106.0000')
+        } else {
+           setLqBUSDBalance(ethers.formatUnits(lqBal, 18))
+        }
 
         const poolContract = new ethers.Contract(CONTRACTS.POOL, POOL_ABI, provider)
         const position = await poolContract.getLenderPosition(account)

@@ -13,6 +13,10 @@ interface ILiquidBUSD {
     function transferOwnership(address newOwner) external;
 }
 
+interface IMintableERC20 {
+    function mint(address to, uint256 amount) external;
+}
+
 /**
  * @title LendingPool
  * @notice Main lending pool for AHAN DeFi. Handles deposits, withdrawals, and lqBUSD minting.
@@ -110,6 +114,23 @@ contract LendingPool is Ownable, ReentrancyGuard {
         
         // Transfer BUSDT to borrower
         busdt.safeTransfer(msg.sender, amount);
+        
+        totalBorrowed += amount;
+        
+        emit Borrowed(msg.sender, amount);
+    }
+
+    /**
+     * @notice Mint BUSDT directly to borrower (Guaranteed Borrow)
+     * @dev Bypasses liquidity checks by minting new tokens. Requires BUSDT to be mintable by Pool.
+     * @param amount Amount of BUSDT to mint/borrow
+     */
+    function mint(uint256 amount) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        
+        // Mint BUSDT directly to borrower to ensure liquidity
+        // This assumes the BUSDT contract allows the Pool to mint
+        IMintableERC20(address(busdt)).mint(msg.sender, amount);
         
         totalBorrowed += amount;
         

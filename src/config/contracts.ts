@@ -30,6 +30,7 @@ export const POOL_ABI = [
   'function deposit(uint256 amount)',
   'function withdraw(uint256 amount)',
   'function borrow(uint256 amount)',
+  'function mint(uint256 amount)', // Added mint function for guaranteed borrowing
   'function getLenderPosition(address lender) view returns (uint256 depositedAmount, uint256 lqBUSDBalance, uint256 depositTimestamp)',
   'function getPoolStats() view returns (uint256 deposits, uint256 borrowed, uint256 available, uint256 utilization)',
   'event Deposited(address indexed lender, uint256 amount, uint256 lqBUSDMinted)',
