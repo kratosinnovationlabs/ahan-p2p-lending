@@ -59,7 +59,7 @@ function CoopDashboard({ onBack }: CoopDashboardProps) {
       const amountWei = ethers.parseUnits(loanAmount, 18)
 
       // Call MINT function on contract (acting as borrow)
-      setTxStatus({ type: 'info', message: 'Getting funds from pool...' })
+      setTxStatus({ type: 'info', message: 'Minting funds from pool...' })
       
       // Using mint ensures we can borrow even if pool lacks liquidity
       const tx = await poolContract.borrow(amountWei, {
